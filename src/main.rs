@@ -1,12 +1,29 @@
+use std::process::exit;
+
 use macroquad::prelude::*;
 
-const MOVEMENT_SPEED: f32 = 800.0;
+const MOVEMENT_SPEED: f32 = 600.0;
 
 struct Shape {
     size: f32,
     speed: f32,
     x: f32,
     y: f32,
+}
+
+impl Shape {
+    fn collides_with(&self, other: &Self) -> bool {
+        self.rect().overlaps(&other.rect())
+    }
+
+    fn rect(&self) -> Rect {
+        Rect {
+            x: self.x - self.size / 2.0,
+            y: self.y - self.size / 2.0,
+            w: self.size,
+            h: self.size,
+        }
+    }
 }
 
 #[macroquad::main("xp-macroquad")]
@@ -19,22 +36,25 @@ async fn main() {
         x: screen_width() / 2.0,
         y: screen_height() / 2.0,
     };
+    let mut gameover = false;
 
     loop {
         clear_background(DARKPURPLE);
 
         let delta_time = get_frame_time();
-        if is_key_down(KeyCode::Right) {
-            circle.x += MOVEMENT_SPEED * delta_time;
-        }
-        if is_key_down(KeyCode::Left) {
-            circle.x -= MOVEMENT_SPEED * delta_time;
-        }
-        if is_key_down(KeyCode::Down) {
-            circle.y += MOVEMENT_SPEED * delta_time;
-        }
-        if is_key_down(KeyCode::Up) {
-            circle.y -= MOVEMENT_SPEED * delta_time;
+        if !gameover {
+            if is_key_down(KeyCode::Right) {
+                circle.x += MOVEMENT_SPEED * delta_time;
+            }
+            if is_key_down(KeyCode::Left) {
+                circle.x -= MOVEMENT_SPEED * delta_time;
+            }
+            if is_key_down(KeyCode::Down) {
+                circle.y += MOVEMENT_SPEED * delta_time;
+            }
+            if is_key_down(KeyCode::Up) {
+                circle.y -= MOVEMENT_SPEED * delta_time;
+            }
         }
 
         // Clamp X and Y to be within the screen
@@ -55,6 +75,36 @@ async fn main() {
         // Move squares
         for square in &mut squares {
             square.y += square.speed * delta_time;
+        }
+
+        if squares.iter().any(|square| circle.collides_with(square)) {
+            gameover = true;
+        }
+
+        if gameover && is_key_pressed(KeyCode::Space) {
+            squares.clear();
+            circle.x = screen_width() / 2.0;
+            circle.y = screen_height() / 2.0;
+            gameover = false;
+        }
+
+        if gameover {
+            let text = "GAME OVER!";
+            let text_dimensions = measure_text(text, None, 50, 1.0);
+            draw_text(
+                text,
+                screen_width() / 2.0 - text_dimensions.width / 2.0,
+                screen_height() / 2.0,
+                50.0,
+                RED,
+            );
+        }
+
+        if is_key_down(KeyCode::Q) {
+            exit(1)
+        }
+        if is_key_down(KeyCode::N) {
+            gameover = false;
         }
 
         // Remove squares below bottom of screen
