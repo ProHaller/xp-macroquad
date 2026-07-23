@@ -10,6 +10,7 @@
 
 # whitelist oustide of src:
 !index.html
+!mq_js_bundle.js
 !.github/
 !.github/**/
 !.github/**/*

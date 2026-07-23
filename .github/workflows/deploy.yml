@@ -13,10 +13,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v2
+        uses: actions/checkout@v6
 
       - name: Install Rust
-        uses: actions-rs/toolchain@v1
+        uses: dtolnay/rust-toolchain@1.95
         with:
           toolchain: stable
           target: wasm32-unknown-unknown
@@ -31,7 +31,7 @@ jobs:
         run: |
           mkdir -p ./deploy
           cp ./target/wasm32-unknown-unknown/release/xp-macroquad.wasm ./deploy/
-          cp index.html ./deploy/
+          cp index.html mq_js_bundle.js ./deploy/
 
       - name: Deploy
         uses: peaceiris/actions-gh-pages@v3
