@@ -1,6 +1,9 @@
 use std::process::exit;
 
-use macroquad::prelude::*;
+use macroquad::{
+    prelude::*,
+    rand::{ChooseRandom, rand},
+};
 
 const MOVEMENT_SPEED: f32 = 600.0;
 
@@ -145,12 +148,14 @@ async fn main() {
             draw_circle(bullet.x, bullet.y, bullet.size / 2.0, RED);
         }
         for square in &squares {
+            let colors = [RED, GREEN, BLUE, BEIGE, BLACK, BLANK];
+            let color = colors.choose().unwrap().to_owned();
             draw_rectangle(
                 square.x - square.size / 2.0,
                 square.y - square.size / 2.0,
                 square.size,
                 square.size,
-                GREEN,
+                color,
             );
         }
 
