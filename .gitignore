@@ -1,0 +1,13 @@
+*
+
+!.gitignore
+
+# whitelist `src` directories and their children, regardless of place
+!src/
+!src/**/
+!src/**/*.rs
+!Cargo.{toml,lock}
+
+# whitelist oustide of src:
+!index.html
+!.github/**/*
