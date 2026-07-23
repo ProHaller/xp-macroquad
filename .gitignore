@@ -10,4 +10,6 @@
 
 # whitelist oustide of src:
 !index.html
+!.github/
+!.github/**/
 !.github/**/*
