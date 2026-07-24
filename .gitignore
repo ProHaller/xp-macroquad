@@ -15,6 +15,7 @@
 # whitelist oustide of src:
 !index.html
 !mq_js_bundle.js
+!starfield-shader.glsl
 !.github/
 !.github/**/
 !.github/**/*
