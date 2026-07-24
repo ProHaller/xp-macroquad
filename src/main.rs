@@ -13,6 +13,7 @@ struct Shape {
     x: f32,
     y: f32,
     collided: bool,
+    color: Color,
 }
 
 impl Shape {
@@ -40,10 +41,13 @@ async fn main() {
         x: screen_width() / 2.0,
         y: screen_height() / 2.0,
         collided: false,
+        color: YELLOW,
     };
     let mut gameover = false;
     let mut bullets: Vec<Shape> = vec![];
     let mut score = 0;
+
+    let colors = [RED, GREEN, BLUE, BEIGE, BLACK, BLANK];
 
     loop {
         clear_background(DARKPURPLE);
@@ -77,6 +81,7 @@ async fn main() {
                 x: rand::gen_range(size / 2.0, screen_width() - size / 2.0),
                 y: -size,
                 collided: false,
+                color: colors.choose().unwrap().to_owned(),
             });
         }
 
@@ -109,9 +114,9 @@ async fn main() {
         let score_dimensions = measure_text(score.to_string(), None, 50, 1.0);
         draw_text(
             score.to_string(),
-            screen_width() / 4.0 - score_dimensions.width / 4.0,
-            screen_height() / 4.0,
-            20.0,
+            screen_width() - 40.0 - score_dimensions.width / 4.0,
+            screen_height() - 40.0,
+            50.0,
             WHITE,
         );
 
@@ -148,6 +153,7 @@ async fn main() {
                 speed: circle.speed * 2.0,
                 size: 5.0,
                 collided: false,
+                color: BLACK,
             });
         }
 
@@ -161,14 +167,12 @@ async fn main() {
         }
 
         for square in &squares {
-            let colors = [RED, GREEN, BLUE, BEIGE, BLACK, BLANK];
-            let color = colors.choose().unwrap();
             draw_rectangle(
                 square.x - square.size / 2.0,
                 square.y - square.size / 2.0,
                 square.size,
                 square.size,
-                color.to_owned(),
+                square.color,
             );
         }
 
