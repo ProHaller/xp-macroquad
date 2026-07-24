@@ -54,16 +54,16 @@ async fn main() {
 
         let delta_time = get_frame_time();
         if !gameover {
-            if is_key_down(KeyCode::Right) {
+            if is_key_down(KeyCode::Right) | is_key_down(KeyCode::I) {
                 circle.x += MOVEMENT_SPEED * delta_time;
             }
-            if is_key_down(KeyCode::Left) {
+            if is_key_down(KeyCode::Left) | is_key_down(KeyCode::L) {
                 circle.x -= MOVEMENT_SPEED * delta_time;
             }
-            if is_key_down(KeyCode::Down) {
+            if is_key_down(KeyCode::Down) | is_key_down(KeyCode::R) {
                 circle.y += MOVEMENT_SPEED * delta_time;
             }
-            if is_key_down(KeyCode::Up) {
+            if is_key_down(KeyCode::Up) | is_key_down(KeyCode::T) {
                 circle.y -= MOVEMENT_SPEED * delta_time;
             }
         }
