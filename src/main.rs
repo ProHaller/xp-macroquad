@@ -1,9 +1,9 @@
+use macroquad::experimental::animation::{AnimatedSprite, Animation};
+use macroquad::prelude::*;
 use macroquad_particles::{self as particles, ColorCurve, Emitter, EmitterConfig};
-use std::{fs, process::exit};
 
-use macroquad::{prelude::*, rand::ChooseRandom};
-
-const MOVEMENT_SPEED: f32 = 600.0;
+use std::fs;
+use std::process::exit;
 
 const FRAGMENT_SHADER: &str = include_str!("starfield-shader.glsl");
 
@@ -23,20 +23,12 @@ void main() {
 }
 ";
 
-enum GameState {
-    MainMenu,
-    Playing,
-    Paused,
-    GameOver,
-}
-
 struct Shape {
     size: f32,
     speed: f32,
     x: f32,
     y: f32,
     collided: bool,
-    color: Color,
 }
 
 impl Shape {
@@ -54,25 +46,55 @@ impl Shape {
     }
 }
 
-#[macroquad::main("xp-macroquad")]
+enum GameState {
+    MainMenu,
+    Playing,
+    Paused,
+    GameOver,
+}
+
+fn particle_explosion() -> particles::EmitterConfig {
+    particles::EmitterConfig {
+        local_coords: false,
+        one_shot: true,
+        emitting: true,
+        lifetime: 0.6,
+        lifetime_randomness: 0.3,
+        explosiveness: 0.65,
+        initial_direction_spread: 2.0 * std::f32::consts::PI,
+        initial_velocity: 300.0,
+        initial_velocity_randomness: 0.8,
+        size: 3.0,
+        size_randomness: 0.3,
+        colors_curve: ColorCurve {
+            start: RED,
+            mid: ORANGE,
+            end: RED,
+        },
+        ..Default::default()
+    }
+}
+
+#[macroquad::main("My game")]
 async fn main() {
+    const MOVEMENT_SPEED: f32 = 600.0;
+
     rand::srand(miniquad::date::now() as u64);
     let mut squares = vec![];
+    let mut bullets: Vec<Shape> = vec![];
     let mut circle = Shape {
         size: 32.0,
         speed: MOVEMENT_SPEED,
-        x: screen_width() / 1.5,
-        y: screen_height() / 1.5,
+        x: screen_width() / 2.0,
+        y: screen_height() / 2.0,
         collided: false,
-        color: YELLOW,
     };
-    let mut game_state = GameState::MainMenu;
-    let mut bullets: Vec<Shape> = vec![];
     let mut score: u32 = 0;
     let mut high_score: u32 = fs::read_to_string("highscore.dat")
         .map_or(Ok(0), |i| i.parse::<u32>())
         .unwrap_or(0);
-    let colors = [RED, GREEN, BLUE, BEIGE, BLACK, BLANK];
+    let mut game_state = GameState::MainMenu;
+
     let mut direction_modifier: f32 = 0.0;
     let render_target = render_target(320, 150);
     render_target.texture.set_filter(FilterMode::Nearest);
@@ -90,7 +112,63 @@ async fn main() {
         },
     )
     .unwrap();
+
     let mut explosions: Vec<(Emitter, Vec2)> = vec![];
+
+    set_pc_assets_folder("assets");
+    let ship_texture: Texture2D = load_texture("ship.png").await.expect("Couldn't load file");
+    ship_texture.set_filter(FilterMode::Nearest);
+    let bullet_texture: Texture2D = load_texture("laser-bolts.png")
+        .await
+        .expect("Couldn't load file");
+    bullet_texture.set_filter(FilterMode::Nearest);
+    build_textures_atlas();
+
+    let mut bullet_sprite = AnimatedSprite::new(
+        16,
+        16,
+        &[
+            Animation {
+                name: "bullet".to_string(),
+                row: 0,
+                frames: 2,
+                fps: 12,
+            },
+            Animation {
+                name: "bolt".to_string(),
+                row: 1,
+                frames: 2,
+                fps: 12,
+            },
+        ],
+        true,
+    );
+    bullet_sprite.set_animation(1);
+    let mut ship_sprite = AnimatedSprite::new(
+        16,
+        24,
+        &[
+            Animation {
+                name: "idle".to_string(),
+                row: 0,
+                frames: 2,
+                fps: 12,
+            },
+            Animation {
+                name: "left".to_string(),
+                row: 2,
+                frames: 2,
+                fps: 12,
+            },
+            Animation {
+                name: "right".to_string(),
+                row: 4,
+                frames: 2,
+                fps: 12,
+            },
+        ],
+        true,
+    );
 
     loop {
         clear_background(BLACK);
@@ -112,10 +190,13 @@ async fn main() {
 
         match game_state {
             GameState::MainMenu => {
-                if is_key_pressed(KeyCode::Escape) | is_key_pressed(KeyCode::Q) {
+                if is_key_pressed(KeyCode::Escape) {
                     std::process::exit(0);
                 }
-                if is_key_pressed(KeyCode::Space) | is_key_down(KeyCode::Enter) {
+                if is_key_pressed(KeyCode::Escape) | is_key_down(KeyCode::Q) {
+                    exit(0)
+                }
+                if is_key_pressed(KeyCode::Space) {
                     squares.clear();
                     bullets.clear();
                     explosions.clear();
@@ -136,13 +217,19 @@ async fn main() {
             }
             GameState::Playing => {
                 let delta_time = get_frame_time();
+                ship_sprite.set_animation(0);
+                if is_key_down(KeyCode::N) {
+                    score = 0;
+                }
                 if is_key_down(KeyCode::Right) | is_key_down(KeyCode::I) {
                     circle.x += MOVEMENT_SPEED * delta_time;
                     direction_modifier += 0.05 * delta_time;
+                    ship_sprite.set_animation(2);
                 }
                 if is_key_down(KeyCode::Left) | is_key_down(KeyCode::L) {
                     circle.x -= MOVEMENT_SPEED * delta_time;
                     direction_modifier -= 0.05 * delta_time;
+                    ship_sprite.set_animation(1);
                 }
                 if is_key_down(KeyCode::Down) | is_key_down(KeyCode::R) {
                     circle.y += MOVEMENT_SPEED * delta_time;
@@ -150,20 +237,13 @@ async fn main() {
                 if is_key_down(KeyCode::Up) | is_key_down(KeyCode::T) {
                     circle.y -= MOVEMENT_SPEED * delta_time;
                 }
-                if is_key_down(KeyCode::Q) | is_key_down(KeyCode::Escape) {
-                    exit(0);
-                }
-                if is_key_down(KeyCode::N) {
-                    score = 0;
-                }
                 if is_key_pressed(KeyCode::Space) {
                     bullets.push(Shape {
                         x: circle.x,
-                        y: circle.y,
+                        y: circle.y - 24.0,
                         speed: circle.speed * 2.0,
-                        size: 5.0,
+                        size: 32.0,
                         collided: false,
-                        color: colors.choose().unwrap().to_owned(),
                     });
                 }
                 if is_key_pressed(KeyCode::Escape) {
@@ -183,7 +263,6 @@ async fn main() {
                         x: rand::gen_range(size / 2.0, screen_width() - size / 2.0),
                         y: -size,
                         collided: false,
-                        color: colors.choose().unwrap().to_owned(),
                     });
                 }
 
@@ -195,6 +274,9 @@ async fn main() {
                     bullet.y -= bullet.speed * delta_time;
                 }
 
+                ship_sprite.update();
+                bullet_sprite.update();
+
                 // Remove shapes outside of screen
                 squares.retain(|square| square.y < screen_height() + square.size);
                 bullets.retain(|bullet| bullet.y > 0.0 - bullet.size / 2.0);
@@ -202,6 +284,8 @@ async fn main() {
                 // Remove collided shapes
                 squares.retain(|square| !square.collided);
                 bullets.retain(|bullet| !bullet.collided);
+
+                // Remove old explosions
                 explosions.retain(|(explosion, _)| explosion.config.emitting);
 
                 // Check for collisions
@@ -230,17 +314,39 @@ async fn main() {
                 }
 
                 // Draw everything
+                let bullet_frame = bullet_sprite.frame();
                 for bullet in &bullets {
-                    draw_circle(bullet.x, bullet.y, bullet.size / 2.0, RED);
+                    draw_texture_ex(
+                        &bullet_texture,
+                        bullet.x - bullet.size / 2.0,
+                        bullet.y - bullet.size / 2.0,
+                        WHITE,
+                        DrawTextureParams {
+                            dest_size: Some(vec2(bullet.size, bullet.size)),
+                            source: Some(bullet_frame.source_rect),
+                            ..Default::default()
+                        },
+                    );
                 }
-                draw_circle(circle.x, circle.y, circle.size / 2.0, YELLOW);
+                let ship_frame = ship_sprite.frame();
+                draw_texture_ex(
+                    &ship_texture,
+                    circle.x - ship_frame.dest_size.x,
+                    circle.y - ship_frame.dest_size.y,
+                    WHITE,
+                    DrawTextureParams {
+                        dest_size: Some(ship_frame.dest_size * 2.0),
+                        source: Some(ship_frame.source_rect),
+                        ..Default::default()
+                    },
+                );
                 for square in &squares {
                     draw_rectangle(
                         square.x - square.size / 2.0,
                         square.y - square.size / 2.0,
                         square.size,
                         square.size,
-                        square.color,
+                        GREEN,
                     );
                 }
                 for (explosion, coords) in explosions.iter_mut() {
@@ -266,6 +372,9 @@ async fn main() {
             GameState::Paused => {
                 if is_key_pressed(KeyCode::Space) {
                     game_state = GameState::Playing;
+                }
+                if is_key_pressed(KeyCode::Q) {
+                    exit(0)
                 }
                 let text = "Paused";
                 let text_dimensions = measure_text(text, None, 50, 1.0);
@@ -294,27 +403,5 @@ async fn main() {
         }
 
         next_frame().await
-    }
-}
-
-fn particle_explosion() -> particles::EmitterConfig {
-    particles::EmitterConfig {
-        local_coords: false,
-        one_shot: true,
-        emitting: true,
-        lifetime: 0.6,
-        lifetime_randomness: 0.3,
-        explosiveness: 0.65,
-        initial_direction_spread: 2.0 * std::f32::consts::PI,
-        initial_velocity: 300.0,
-        initial_velocity_randomness: 0.8,
-        size: 3.0,
-        size_randomness: 0.3,
-        colors_curve: ColorCurve {
-            start: RED,
-            mid: ORANGE,
-            end: RED,
-        },
-        ..Default::default()
     }
 }
