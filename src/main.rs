@@ -75,7 +75,7 @@ fn particle_explosion() -> particles::EmitterConfig {
     }
 }
 
-#[macroquad::main("My game")]
+#[macroquad::main("xp-macroquad")]
 async fn main() {
     const MOVEMENT_SPEED: f32 = 600.0;
 
