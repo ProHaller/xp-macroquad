@@ -8,6 +8,10 @@
 !src/**/*.rs
 !Cargo.{toml,lock}
 
+!assets/
+!assets/**/
+!assets/**/*
+
 # whitelist oustide of src:
 !index.html
 !mq_js_bundle.js
