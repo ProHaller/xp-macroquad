@@ -43,6 +43,7 @@ async fn main() {
     };
     let mut gameover = false;
     let mut bullets: Vec<Shape> = vec![];
+    let mut score = 0;
 
     loop {
         clear_background(DARKPURPLE);
@@ -92,6 +93,8 @@ async fn main() {
                 if bullet.collides_with(square) {
                     bullet.collided = true;
                     square.collided = true;
+
+                    score += 1;
                 }
             }
         }
@@ -102,6 +105,15 @@ async fn main() {
         bullets.retain(|bullet| bullet.y > 0.0 - bullet.size / 2.0);
         squares.retain(|square| !square.collided);
         bullets.retain(|bullet| !bullet.collided);
+
+        let score_dimensions = measure_text(score.to_string(), None, 50, 1.0);
+        draw_text(
+            score.to_string(),
+            screen_width() / 4.0 - score_dimensions.width / 4.0,
+            screen_height() / 4.0,
+            20.0,
+            WHITE,
+        );
 
         if gameover && is_key_pressed(KeyCode::Space) {
             squares.clear();
@@ -147,15 +159,16 @@ async fn main() {
         for bullet in &bullets {
             draw_circle(bullet.x, bullet.y, bullet.size / 2.0, RED);
         }
+
         for square in &squares {
             let colors = [RED, GREEN, BLUE, BEIGE, BLACK, BLANK];
-            let color = colors.choose().unwrap().to_owned();
+            let color = colors.choose().unwrap();
             draw_rectangle(
                 square.x - square.size / 2.0,
                 square.y - square.size / 2.0,
                 square.size,
                 square.size,
-                color,
+                color.to_owned(),
             );
         }
 
