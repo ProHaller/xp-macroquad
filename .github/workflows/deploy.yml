@@ -28,7 +28,7 @@ jobs:
       - name: Prepare Deployment Directory
         run: |
           mkdir -p ./deploy/assets
-          cp ./target/wasm32-unknown-unknown/release/my-game.wasm ./deploy/
+          cp ./target/wasm32-unknown-unknown/release/xp-macroquad.wasm ./deploy/
           cp index.html ./deploy/
           cp -r assets/ ./deploy/
 
