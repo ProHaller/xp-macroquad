@@ -1,9 +1,19 @@
+use macroquad::audio::{PlaySoundParams, load_sound, play_sound};
 use macroquad::experimental::animation::{AnimatedSprite, Animation};
 use macroquad::prelude::*;
+use macroquad::ui::{hash, root_ui, widgets};
 use macroquad_particles::{self as particles, ColorCurve, Emitter, EmitterConfig};
+use ron::de::SpannedError;
+use serde::{Deserialize, Serialize};
+use time::OffsetDateTime;
 
+use std::cmp::max_by;
 use std::fs;
 use std::process::exit;
+use std::str::FromStr;
+use std::time::SystemTime;
+
+use crate::Mode::MainMenu;
 
 const FRAGMENT_SHADER: &str = include_str!("starfield-shader.glsl");
 
@@ -23,6 +33,7 @@ void main() {
 }
 ";
 
+#[derive(Debug)]
 struct Shape {
     size: f32,
     speed: f32,
@@ -46,11 +57,55 @@ impl Shape {
     }
 }
 
-enum GameState {
+#[derive(Debug)]
+enum Mode {
     MainMenu,
     Playing,
     Paused,
     GameOver,
+    Input,
+}
+
+#[derive(Eq, PartialEq, PartialOrd, Ord, Clone, Serialize, Deserialize, Debug)]
+struct Score {
+    name: String,
+    points: u32,
+    timestamp: SystemTime,
+}
+
+impl Default for Score {
+    fn default() -> Self {
+        Self {
+            name: Default::default(),
+            points: Default::default(),
+            timestamp: SystemTime::now(),
+        }
+    }
+}
+
+impl ScoreBoard {
+    fn best(&self) -> Score {
+        self.scores.iter().max().cloned().unwrap_or_default()
+    }
+}
+
+#[derive(Eq, PartialEq, Ord, PartialOrd, Clone, Serialize, Deserialize, Debug, Default)]
+struct ScoreBoard {
+    scores: Vec<Score>,
+}
+
+impl FromStr for ScoreBoard {
+    type Err = SpannedError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        ron::from_str(s)
+    }
+}
+impl ScoreBoard {
+    fn save(&self) {
+        let serialized = ron::to_string(&self).unwrap();
+        fs::write("highscore.ron", serialized).unwrap();
+    }
 }
 
 fn particle_explosion() -> particles::EmitterConfig {
@@ -82,7 +137,7 @@ async fn main() {
     rand::srand(miniquad::date::now() as u64);
     let mut squares = vec![];
     let mut bullets: Vec<Shape> = vec![];
-    let mut circle = Shape {
+    let mut player_ship = Shape {
         size: 32.0,
         speed: MOVEMENT_SPEED,
         x: screen_width() / 2.0,
@@ -90,10 +145,12 @@ async fn main() {
         collided: false,
     };
     let mut score: u32 = 0;
-    let mut high_score: u32 = fs::read_to_string("highscore.dat")
-        .map_or(Ok(0), |i| i.parse::<u32>())
-        .unwrap_or(0);
-    let mut game_state = GameState::MainMenu;
+    let mut score_board = fs::read_to_string("highscore.ron")
+        .map_or(Ok(ScoreBoard::default()), |i| i.parse::<ScoreBoard>())
+        .unwrap_or_default();
+    let mut game_state = Mode::MainMenu;
+
+    let mut input_text = String::new();
 
     let mut direction_modifier: f32 = 0.0;
     let render_target = render_target(320, 150);
@@ -176,7 +233,7 @@ async fn main() {
         true,
     );
 
-    let mut enemy_sprite = AnimatedSprite::new(
+    let enemy_sprite = AnimatedSprite::new(
         16,
         24,
         &[
@@ -202,6 +259,19 @@ async fn main() {
         true,
     );
 
+    let theme_music = load_sound("8bit-spaceshooter.ogg").await.unwrap();
+    let sound_explosion = load_sound("explosion.wav").await.unwrap();
+    let sound_gameover = load_sound("fart_1.wav").await.unwrap();
+    let sound_laser = load_sound("laser.wav").await.unwrap();
+
+    play_sound(
+        &theme_music,
+        PlaySoundParams {
+            looped: true,
+            volume: 1.,
+        },
+    );
+
     loop {
         clear_background(BLACK);
 
@@ -221,7 +291,7 @@ async fn main() {
         gl_use_default_material();
 
         match game_state {
-            GameState::MainMenu => {
+            Mode::MainMenu => {
                 if is_key_pressed(KeyCode::Escape) {
                     std::process::exit(0);
                 }
@@ -232,10 +302,10 @@ async fn main() {
                     squares.clear();
                     bullets.clear();
                     explosions.clear();
-                    circle.x = screen_width() / 2.0;
-                    circle.y = screen_height() / 2.0;
+                    player_ship.x = screen_width() / 2.0;
+                    player_ship.y = screen_height() / 2.0;
                     score = 0;
-                    game_state = GameState::Playing;
+                    game_state = Mode::Playing;
                 }
                 let text = "Press space";
                 let text_dimensions = measure_text(text, None, 50, 1.0);
@@ -247,44 +317,52 @@ async fn main() {
                     WHITE,
                 );
             }
-            GameState::Playing => {
+            Mode::Playing => {
                 let delta_time = get_frame_time();
                 ship_sprite.set_animation(0);
                 if is_key_down(KeyCode::N) {
                     score = 0;
                 }
                 if is_key_down(KeyCode::Right) | is_key_down(KeyCode::I) {
-                    circle.x += MOVEMENT_SPEED * delta_time;
+                    player_ship.x += MOVEMENT_SPEED * delta_time;
                     direction_modifier += 0.05 * delta_time;
                     ship_sprite.set_animation(2);
                 }
                 if is_key_down(KeyCode::Left) | is_key_down(KeyCode::L) {
-                    circle.x -= MOVEMENT_SPEED * delta_time;
+                    player_ship.x -= MOVEMENT_SPEED * delta_time;
                     direction_modifier -= 0.05 * delta_time;
                     ship_sprite.set_animation(1);
                 }
                 if is_key_down(KeyCode::Down) | is_key_down(KeyCode::R) {
-                    circle.y += MOVEMENT_SPEED * delta_time;
+                    player_ship.y += MOVEMENT_SPEED * delta_time;
                 }
                 if is_key_down(KeyCode::Up) | is_key_down(KeyCode::T) {
-                    circle.y -= MOVEMENT_SPEED * delta_time;
+                    player_ship.y -= MOVEMENT_SPEED * delta_time;
                 }
                 if is_key_pressed(KeyCode::Space) {
                     bullets.push(Shape {
-                        x: circle.x,
-                        y: circle.y - 24.0,
-                        speed: circle.speed * 2.0,
+                        x: player_ship.x,
+                        y: player_ship.y - 24.0,
+                        speed: player_ship.speed * 2.0,
                         size: 32.0,
                         collided: false,
                     });
+
+                    play_sound(
+                        &sound_laser,
+                        PlaySoundParams {
+                            looped: false,
+                            volume: 1.,
+                        },
+                    );
                 }
                 if is_key_pressed(KeyCode::Escape) {
-                    game_state = GameState::Paused;
+                    game_state = Mode::Paused;
                 }
 
                 // Clamp X and Y to be within the screen
-                circle.x = clamp(circle.x, 0.0, screen_width());
-                circle.y = clamp(circle.y, 0.0, screen_height());
+                player_ship.x = clamp(player_ship.x, 0.0, screen_width());
+                player_ship.y = clamp(player_ship.y, 0.0, screen_height());
 
                 // Generate a new square
                 if rand::gen_range(0, 99) >= 95 {
@@ -321,11 +399,18 @@ async fn main() {
                 explosions.retain(|(explosion, _)| explosion.config.emitting);
 
                 // Check for collisions
-                if squares.iter().any(|square| circle.collides_with(square)) {
-                    if score == high_score {
-                        fs::write("highscore.dat", high_score.to_string()).ok();
-                    }
-                    game_state = GameState::GameOver;
+                if squares
+                    .iter()
+                    .any(|square| player_ship.collides_with(square))
+                {
+                    play_sound(
+                        &sound_gameover,
+                        PlaySoundParams {
+                            looped: false,
+                            volume: 2.,
+                        },
+                    );
+                    game_state = Mode::GameOver;
                 }
                 for square in squares.iter_mut() {
                     for bullet in bullets.iter_mut() {
@@ -333,7 +418,7 @@ async fn main() {
                             bullet.collided = true;
                             square.collided = true;
                             score += square.size.round() as u32;
-                            high_score = high_score.max(score);
+                            // TODO: handle error
                             explosions.push((
                                 Emitter::new(EmitterConfig {
                                     amount: square.size.round() as u32 * 2,
@@ -341,6 +426,13 @@ async fn main() {
                                 }),
                                 vec2(square.x, square.y),
                             ));
+                            play_sound(
+                                &sound_explosion,
+                                PlaySoundParams {
+                                    looped: false,
+                                    volume: 1.,
+                                },
+                            );
                         }
                     }
                 }
@@ -365,8 +457,8 @@ async fn main() {
                 let enemy_frame = enemy_sprite.frame();
                 draw_texture_ex(
                     &ship_texture,
-                    circle.x - ship_frame.dest_size.x,
-                    circle.y - ship_frame.dest_size.y,
+                    player_ship.x - ship_frame.dest_size.x,
+                    player_ship.y - ship_frame.dest_size.y,
                     WHITE,
                     DrawTextureParams {
                         dest_size: Some(ship_frame.dest_size),
@@ -380,6 +472,7 @@ async fn main() {
                         square.x - enemy_frame.dest_size.x * 2.0,
                         square.y - enemy_frame.dest_size.y * 2.0,
                         GREEN,
+                        // TODO: Fix enemy size
                         DrawTextureParams {
                             dest_size: Some(enemy_frame.dest_size / 1. + square.size),
                             source: Some(enemy_frame.source_rect),
@@ -397,7 +490,11 @@ async fn main() {
                     25.0,
                     WHITE,
                 );
-                let highscore_text = format!("High score: {}", high_score);
+                let highscore_text = format!(
+                    "High score: {}: {}",
+                    score_board.best().name,
+                    score_board.best().points
+                );
                 let text_dimensions = measure_text(highscore_text.as_str(), None, 25, 1.0);
                 draw_text(
                     highscore_text.as_str(),
@@ -407,9 +504,9 @@ async fn main() {
                     WHITE,
                 );
             }
-            GameState::Paused => {
+            Mode::Paused => {
                 if is_key_pressed(KeyCode::Space) {
-                    game_state = GameState::Playing;
+                    game_state = Mode::Playing;
                 }
                 if is_key_pressed(KeyCode::Q) {
                     exit(0)
@@ -424,9 +521,12 @@ async fn main() {
                     WHITE,
                 );
             }
-            GameState::GameOver => {
-                if is_key_pressed(KeyCode::Space) {
-                    game_state = GameState::MainMenu;
+            Mode::GameOver => {
+                if is_key_pressed(KeyCode::Space) | is_key_pressed(KeyCode::N) {
+                    game_state = Mode::MainMenu;
+                }
+                if is_key_pressed(KeyCode::Q) {
+                    exit(0)
                 }
                 let text = "GAME OVER!";
                 let text_dimensions = measure_text(text, None, 50, 1.0);
@@ -437,9 +537,72 @@ async fn main() {
                     50.0,
                     RED,
                 );
+                if score > score_board.best().points {
+                    game_state = Mode::Input
+                }
+            }
+            Mode::Input => {
+                widgets::Window::new(
+                    hash!(),
+                    vec2(screen_width() / 2., screen_height() / 2.),
+                    vec2(500., 300.),
+                )
+                .label("Input")
+                .ui(&mut root_ui(), |ui| {
+                    ui.input_text(hash!(), "Your Name", &mut input_text);
+                    if ui.button(None, "Save") {
+                        score_board.scores.push(Score {
+                            name: input_text.clone(),
+                            points: score,
+                            timestamp: SystemTime::now(),
+                        });
+                        score_board.save();
+                        game_state = MainMenu;
+                    }
+                });
             }
         }
 
-        next_frame().await
+        next_frame().await;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::error::Error;
+
+    use super::*;
+
+    #[test]
+    fn test_serialize() {
+        let score = Score {
+            name: "test".to_string(),
+            points: 999999,
+            timestamp: std::time::SystemTime::now(),
+        };
+        let score2 = Score {
+            name: "test2".to_string(),
+            points: 999999,
+            timestamp: std::time::SystemTime::now(),
+        };
+        let scores = vec![score, score2];
+
+        let serialize = ron::to_string(&scores).unwrap();
+        fs::write("test.ron", &serialize).unwrap();
+        dbg!(&serialize);
+        assert_eq!(ron::from_str::<Vec<Score>>(&serialize).unwrap(), scores);
+    }
+
+    #[test]
+    fn load_score() -> Result<(), Box<dyn Error>> {
+        let scores_str = fs::read_to_string("highscore.ron")?;
+        dbg!(&scores_str);
+        let parsed: ScoreBoard = ron::from_str(&scores_str)?;
+        dbg!(&parsed);
+        let scores: Vec<u32> = parsed.scores.iter().map(|s| s.points).collect();
+        dbg!(&scores);
+
+        assert!(scores.iter().max().unwrap() > &0u32);
+        Ok(())
     }
 }

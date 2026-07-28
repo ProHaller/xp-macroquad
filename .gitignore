@@ -10,7 +10,7 @@
 
 !assets/
 !assets/**/
-!assets/**/*
+!assets/**/*{.ogg,.ttf,.png,.wav,.md}
 
 # whitelist oustide of src:
 !index.html
