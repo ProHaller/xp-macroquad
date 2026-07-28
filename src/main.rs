@@ -118,6 +118,12 @@ async fn main() {
     set_pc_assets_folder("assets");
     let ship_texture: Texture2D = load_texture("ship.png").await.expect("Couldn't load file");
     ship_texture.set_filter(FilterMode::Nearest);
+
+    let enemy_texture: Texture2D = load_texture("enemy-small.png")
+        .await
+        .expect("Couldn't load file");
+    enemy_texture.set_filter(FilterMode::Nearest);
+
     let bullet_texture: Texture2D = load_texture("laser-bolts.png")
         .await
         .expect("Couldn't load file");
@@ -145,6 +151,32 @@ async fn main() {
     );
     bullet_sprite.set_animation(1);
     let mut ship_sprite = AnimatedSprite::new(
+        16,
+        24,
+        &[
+            Animation {
+                name: "idle".to_string(),
+                row: 0,
+                frames: 2,
+                fps: 12,
+            },
+            Animation {
+                name: "left".to_string(),
+                row: 2,
+                frames: 2,
+                fps: 12,
+            },
+            Animation {
+                name: "right".to_string(),
+                row: 4,
+                frames: 2,
+                fps: 12,
+            },
+        ],
+        true,
+    );
+
+    let mut enemy_sprite = AnimatedSprite::new(
         16,
         24,
         &[
@@ -329,24 +361,30 @@ async fn main() {
                     );
                 }
                 let ship_frame = ship_sprite.frame();
+
+                let enemy_frame = enemy_sprite.frame();
                 draw_texture_ex(
                     &ship_texture,
                     circle.x - ship_frame.dest_size.x,
                     circle.y - ship_frame.dest_size.y,
                     WHITE,
                     DrawTextureParams {
-                        dest_size: Some(ship_frame.dest_size * 2.0),
+                        dest_size: Some(ship_frame.dest_size),
                         source: Some(ship_frame.source_rect),
                         ..Default::default()
                     },
                 );
                 for square in &squares {
-                    draw_rectangle(
-                        square.x - square.size / 2.0,
-                        square.y - square.size / 2.0,
-                        square.size,
-                        square.size,
+                    draw_texture_ex(
+                        &enemy_texture,
+                        square.x - enemy_frame.dest_size.x * 2.0,
+                        square.y - enemy_frame.dest_size.y * 2.0,
                         GREEN,
+                        DrawTextureParams {
+                            dest_size: Some(enemy_frame.dest_size / 1. + square.size),
+                            source: Some(enemy_frame.source_rect),
+                            ..Default::default()
+                        },
                     );
                 }
                 for (explosion, coords) in explosions.iter_mut() {
