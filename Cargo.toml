@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+color-eyre = "0.6.5"
 macroquad = { version = "0.4.15", features = ["audio"] }
 macroquad-particles = "0.2.2"
 ron = "0.12.2"
