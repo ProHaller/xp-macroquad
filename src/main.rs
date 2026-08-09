@@ -1,447 +1,28 @@
-use color_eyre::{
-    Result,
-    eyre::{Ok, WrapErr},
-};
+use std::{f32::consts::PI, process::exit, time::SystemTime};
+
+use color_eyre::Result;
 use macroquad::{
-    audio::{PlaySoundParams, Sound, load_sound, play_sound},
-    experimental::animation::{AnimatedSprite, Animation},
+    audio::{PlaySoundParams, play_sound},
     prelude::*,
     ui::{hash, root_ui, widgets},
 };
-use macroquad_particles::{self as particles, ColorCurve, Emitter, EmitterConfig};
+use macroquad_particles::{ColorCurve, Emitter, EmitterConfig};
+mod assets;
+mod score;
+mod state;
 
-use ron::de::SpannedError;
-use serde::{Deserialize, Serialize};
+use assets::Assets;
+use state::{MOVEMENT_SPEED, Mode, Shape, State};
 
-use std::{fmt::Debug, fs, path::Path, process::exit, str::FromStr, time::SystemTime};
-
-use crate::Mode::MainMenu;
-
-const FRAGMENT_SHADER: &str = include_str!("starfield-shader.glsl");
-const VERTEX_SHADER: &str = include_str!("vertex_shader.glsl");
-const HIGHSCORE_PATH: &str = "highscore.ron";
-const MOVEMENT_SPEED: f32 = 600.0;
-
-#[derive(Debug)]
-struct Shape {
-    size: f32,
-    speed: f32,
-    x: f32,
-    y: f32,
-    collided: bool,
-}
-
-impl Shape {
-    fn collides_with(&self, other: &Self) -> bool {
-        self.rect().overlaps(&other.rect())
-    }
-
-    fn rect(&self) -> Rect {
-        Rect {
-            x: self.x - self.size / 2.0,
-            y: self.y - self.size / 2.0,
-            w: self.size,
-            h: self.size,
-        }
-    }
-}
-
-#[derive(Debug)]
-enum Mode {
-    MainMenu,
-    Playing,
-    Paused,
-    GameOver,
-    Input,
-}
-
-#[derive(Debug)]
-struct Assets {
-    textures: Textures,
-    sounds: Sounds,
-    material: Material,
-    render_target: RenderTarget,
-}
-
-impl Assets {
-    async fn load() -> Result<Self> {
-        set_pc_assets_folder("assets");
-        let textures = Textures::load().await?;
-        let sounds = Sounds::load().await?;
-        let material = load_material(
-            ShaderSource::Glsl {
-                vertex: VERTEX_SHADER,
-                fragment: FRAGMENT_SHADER,
-            },
-            MaterialParams {
-                uniforms: vec![
-                    UniformDesc::new("iResolution", UniformType::Float2),
-                    UniformDesc::new("direction_modifier", UniformType::Float1),
-                ],
-                ..Default::default()
-            },
-        )
-        .with_context(|| "Couldn't load Material")?;
-
-        build_textures_atlas();
-
-        let render_target = render_target(screen_width() as u32, screen_height() as u32);
-        render_target.texture.set_filter(FilterMode::Nearest);
-
-        Ok(Self {
-            textures,
-            sounds,
-            material,
-            render_target,
-        })
-    }
-    fn render(&self, direction_modifier: f32) {
-        self.material
-            .set_uniform("iResolution", (screen_width(), screen_height()));
-        self.material
-            .set_uniform("direction_modifier", direction_modifier);
-        gl_use_material(&self.material);
-        draw_texture_ex(
-            &self.render_target.texture,
-            0.,
-            0.,
-            WHITE,
-            DrawTextureParams {
-                dest_size: Some(vec2(screen_width(), screen_height())),
-                ..Default::default()
-            },
-        );
-        gl_use_default_material();
-    }
-}
-
-#[allow(unused)]
-#[derive(Debug)]
-struct Textures {
-    ship: Texture2D,
-    enemy_small: Texture2D,
-    enemy_medium: Texture2D,
-    enemy_big: Texture2D,
-    laser: Texture2D,
-}
-impl Textures {
-    async fn load() -> Result<Self> {
-        let ship: Texture2D = load_texture("ship.png")
-            .await
-            .with_context(|| "Couldn't load file")?;
-        ship.set_filter(FilterMode::Nearest);
-
-        let enemy_small: Texture2D = load_texture("enemy-small.png")
-            .await
-            .with_context(|| "Couldn't load file")?;
-        enemy_small.set_filter(FilterMode::Nearest);
-
-        let enemy_medium: Texture2D = load_texture("enemy-medium.png")
-            .await
-            .with_context(|| "Couldn't load file")?;
-        enemy_medium.set_filter(FilterMode::Nearest);
-
-        let enemy_big: Texture2D = load_texture("enemy-big.png")
-            .await
-            .with_context(|| "Couldn't load file")?;
-        enemy_big.set_filter(FilterMode::Nearest);
-
-        let laser: Texture2D = load_texture("laser-bolts.png")
-            .await
-            .with_context(|| "Couldn't load file")?;
-        laser.set_filter(FilterMode::Nearest);
-        Ok(Self {
-            ship,
-            enemy_small,
-            enemy_medium,
-            enemy_big,
-            laser,
-        })
-    }
-}
-
-#[derive(Debug)]
-struct Sounds {
-    theme: Sound,
-    explosion: Sound,
-    gameover: Sound,
-    laser: Sound,
-}
-
-impl Sounds {
-    async fn load() -> Result<Self> {
-        let theme = load_sound("8bit-spaceshooter.ogg").await?;
-        let explosion = load_sound("explosion.wav").await?;
-        let gameover = load_sound("fart_1.wav").await?;
-        let laser = load_sound("laser.wav").await?;
-        Ok(Self {
-            theme,
-            explosion,
-            gameover,
-            laser,
-        })
-    }
-}
-
-#[allow(unused)]
-struct State {
-    player_ship: Shape,
-    lasers: Vec<Shape>,
-    enemies: Vec<Shape>,
-
-    laser_sprite: AnimatedSprite,
-    ship_sprite: AnimatedSprite,
-    enemy_small_sprite: AnimatedSprite,
-    medium_enemy_sprite: AnimatedSprite,
-    large_enemy_sprite: AnimatedSprite,
-
-    explosions: Vec<(Emitter, Vec2)>,
-    direction_modifier: f32,
-    input_text: String,
-    score_board: ScoreBoard,
-    score: u32,
-    mode: Mode,
-}
-
-impl State {
-    fn init() -> State {
-        let player_ship = Shape {
-            size: 32.0,
-            speed: MOVEMENT_SPEED,
-            x: screen_width() / 2.0,
-            y: screen_height() / 3.0,
-            collided: false,
-        };
-        let lasers = vec![];
-        let enemies = vec![];
-        let explosions: Vec<(Emitter, Vec2)> = vec![];
-
-        let direction_modifier: f32 = 0.0;
-        let input_text = String::new();
-
-        let score_board = ScoreBoard::from(HIGHSCORE_PATH);
-        let score: u32 = 0;
-
-        let mode = Mode::MainMenu;
-
-        let mut laser_sprite = AnimatedSprite::new(
-            16,
-            16,
-            &[
-                Animation {
-                    name: "laser".to_string(),
-                    row: 0,
-                    frames: 2,
-                    fps: 12,
-                },
-                Animation {
-                    name: "bolt".to_string(),
-                    row: 1,
-                    frames: 2,
-                    fps: 12,
-                },
-            ],
-            true,
-        );
-        laser_sprite.set_animation(1);
-        let ship_sprite = AnimatedSprite::new(
-            16,
-            24,
-            &[
-                Animation {
-                    name: "idle".to_string(),
-                    row: 0,
-                    frames: 2,
-                    fps: 12,
-                },
-                Animation {
-                    name: "left".to_string(),
-                    row: 2,
-                    frames: 2,
-                    fps: 12,
-                },
-                Animation {
-                    name: "right".to_string(),
-                    row: 4,
-                    frames: 2,
-                    fps: 12,
-                },
-            ],
-            true,
-        );
-
-        let enemy_small_sprite = AnimatedSprite::new(
-            16,
-            24,
-            &[
-                Animation {
-                    name: "idle".to_string(),
-                    row: 0,
-                    frames: 2,
-                    fps: 12,
-                },
-                Animation {
-                    name: "left".to_string(),
-                    row: 2,
-                    frames: 2,
-                    fps: 12,
-                },
-                Animation {
-                    name: "right".to_string(),
-                    row: 4,
-                    frames: 2,
-                    fps: 12,
-                },
-            ],
-            true,
-        );
-        let medium_enemy_sprite = AnimatedSprite::new(
-            16,
-            24,
-            &[
-                Animation {
-                    name: "idle".to_string(),
-                    row: 0,
-                    frames: 2,
-                    fps: 12,
-                },
-                Animation {
-                    name: "left".to_string(),
-                    row: 2,
-                    frames: 2,
-                    fps: 12,
-                },
-                Animation {
-                    name: "right".to_string(),
-                    row: 4,
-                    frames: 2,
-                    fps: 12,
-                },
-            ],
-            true,
-        );
-        let large_enemy_sprite = AnimatedSprite::new(
-            16,
-            24,
-            &[
-                Animation {
-                    name: "idle".to_string(),
-                    row: 0,
-                    frames: 2,
-                    fps: 12,
-                },
-                Animation {
-                    name: "left".to_string(),
-                    row: 2,
-                    frames: 2,
-                    fps: 12,
-                },
-                Animation {
-                    name: "right".to_string(),
-                    row: 4,
-                    frames: 2,
-                    fps: 12,
-                },
-            ],
-            true,
-        );
-
-        State {
-            player_ship,
-            lasers,
-            enemies,
-            explosions,
-            direction_modifier,
-            input_text,
-            score_board,
-            score,
-            mode,
-            laser_sprite,
-            ship_sprite,
-            enemy_small_sprite,
-            medium_enemy_sprite,
-            large_enemy_sprite,
-        }
-    }
-}
-
-impl Debug for State {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("State")
-            .field("player_ship", &self.player_ship)
-            .field("laser", &self.lasers)
-            .field("enemies", &self.enemies)
-            .field("explosions count", &self.explosions.len())
-            .field("direction_modifier", &self.direction_modifier)
-            .field("input_text", &self.input_text)
-            .field("score_board", &self.score_board)
-            .field("score", &self.score)
-            .field("mode", &self.mode)
-            .finish()
-    }
-}
-
-#[derive(Eq, PartialEq, PartialOrd, Ord, Clone, Serialize, Deserialize, Debug)]
-struct Score {
-    name: String,
-    points: u32,
-    timestamp: SystemTime,
-}
-
-impl Default for Score {
-    fn default() -> Self {
-        Self {
-            name: String::from("Anonymous"),
-            points: Default::default(),
-            timestamp: SystemTime::now(),
-        }
-    }
-}
-
-impl ScoreBoard {
-    fn best(&self) -> Score {
-        self.scores.iter().max().cloned().unwrap_or_default()
-    }
-}
-
-#[derive(Eq, PartialEq, Ord, PartialOrd, Clone, Serialize, Deserialize, Debug, Default)]
-struct ScoreBoard {
-    scores: Vec<Score>,
-}
-
-impl FromStr for ScoreBoard {
-    type Err = SpannedError;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        ron::from_str(s)
-    }
-}
-impl<T> From<T> for ScoreBoard
-where
-    T: AsRef<Path>,
-{
-    fn from(value: T) -> ScoreBoard {
-        fs::read_to_string(value).map_or(ScoreBoard::default(), |i| {
-            ScoreBoard::from_str(&i).unwrap_or_default()
-        })
-    }
-}
-impl ScoreBoard {
-    fn save(&self) {
-        let serialized = ron::to_string(&self).expect("failed serialization");
-        fs::write(HIGHSCORE_PATH, serialized).unwrap();
-    }
-}
-
-fn particle_explosion() -> particles::EmitterConfig {
-    particles::EmitterConfig {
+fn particle_explosion() -> EmitterConfig {
+    EmitterConfig {
         local_coords: false,
         one_shot: true,
         emitting: true,
         lifetime: 0.6,
         lifetime_randomness: 0.3,
         explosiveness: 0.65,
-        initial_direction_spread: 2.0 * std::f32::consts::PI,
+        initial_direction_spread: 2.0 * PI,
         initial_velocity: 300.0,
         initial_velocity_randomness: 0.8,
         size: 3.0,
@@ -472,9 +53,7 @@ async fn main() -> Result<()> {
 
     loop {
         clear_background(BLACK);
-
         assets.render(state.direction_modifier);
-
         match state.mode {
             Mode::MainMenu => {
                 main_menu(&mut state);
@@ -492,7 +71,6 @@ async fn main() -> Result<()> {
                 input(&mut state);
             }
         }
-
         next_frame().await;
     }
 }
@@ -507,20 +85,22 @@ fn input(state: &mut State) {
     .ui(&mut root_ui(), |ui| {
         ui.input_text(hash!(), "Your Name", &mut state.input_text);
         if ui.button(None, "Save") {
-            state.score_board.scores.push(Score {
+            state.score_board.scores.push(score::Score {
                 name: state.input_text.clone(),
                 points: state.score,
                 timestamp: SystemTime::now(),
             });
-            state.score_board.save();
-            state.mode = MainMenu;
+            if let Err(e) = state.score_board.save() {
+                eprintln!("Score save failed:\n{e}");
+            }
+            state.mode = Mode::MainMenu;
         }
     });
 }
 
 fn game_over(state: &mut State) {
     if is_key_pressed(KeyCode::Space) || is_key_pressed(KeyCode::N) {
-        state.mode = MainMenu;
+        state.mode = Mode::MainMenu;
     }
     if is_key_pressed(KeyCode::Q) {
         exit(0)
@@ -671,7 +251,6 @@ fn playing(state: &mut State, assets: &Assets) {
         }
     }
 
-    // Draw everything
     let laser_frame = state.laser_sprite.frame();
     for laser in &state.lasers {
         draw_texture_ex(
@@ -759,14 +338,14 @@ fn paused(state: &mut State) {
 
 fn main_menu(state: &mut State) {
     if is_key_pressed(KeyCode::Escape) || is_key_down(KeyCode::Q) {
-        std::process::exit(0);
+        exit(0);
     }
     if is_key_pressed(KeyCode::Space) {
         state.enemies.clear();
         state.lasers.clear();
         state.explosions.clear();
         state.player_ship.x = screen_width() / 2.0;
-        state.player_ship.y = screen_height() / 3.0;
+        state.player_ship.y = screen_height() / 3.0 * 2.;
         state.score = 0;
         state.mode = Mode::Playing;
     }
@@ -793,44 +372,5 @@ fn wrap_around(ship: &mut Shape) {
     }
     if ship.y < 0. {
         ship.y = screen_height()
-    }
-}
-
-#[cfg(test)]
-mod tests {
-
-    use super::*;
-
-    #[test]
-    fn test_serialize() {
-        let score = Score {
-            name: "test".to_string(),
-            points: 999999,
-            timestamp: std::time::SystemTime::now(),
-        };
-        let score2 = Score {
-            name: "test2".to_string(),
-            points: 999999,
-            timestamp: std::time::SystemTime::now(),
-        };
-        let scores = vec![score, score2];
-
-        let serialize = ron::to_string(&scores).unwrap();
-        fs::write("test.ron", &serialize).unwrap();
-        dbg!(&serialize);
-        assert_eq!(ron::from_str::<Vec<Score>>(&serialize).unwrap(), scores);
-    }
-
-    #[test]
-    fn test_load_score() -> Result<()> {
-        let scores_str = fs::read_to_string("highscore.ron")?;
-        dbg!(&scores_str);
-        let parsed: ScoreBoard = ron::from_str(&scores_str)?;
-        dbg!(&parsed);
-        let scores: Vec<u32> = parsed.scores.iter().map(|s| s.points).collect();
-        dbg!(&scores);
-
-        assert!(scores.iter().max().unwrap() > &0u32);
-        Ok(())
     }
 }
