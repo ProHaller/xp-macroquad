@@ -1,9 +1,12 @@
-use crate::score::HIGHSCORE_PATH;
+use crate::{
+    assets::{Enemy, EnemyKind},
+    score::HIGHSCORE_PATH,
+};
 
 use super::score;
 use macroquad::{
     experimental::animation::{AnimatedSprite, Animation},
-    math::{Rect, Vec2},
+    math::{Rect, Vec2, vec2},
     window::{screen_height, screen_width},
 };
 use std::fmt::Debug;
@@ -14,7 +17,7 @@ pub const MOVEMENT_SPEED: f32 = 600.0;
 
 #[derive(Debug)]
 pub struct Shape {
-    pub size: f32,
+    pub size: Vec2,
     pub speed: f32,
     pub x: f32,
     pub y: f32,
@@ -28,10 +31,10 @@ impl Shape {
 
     pub fn rect(&self) -> Rect {
         Rect {
-            x: self.x - self.size / 2.0,
-            y: self.y - self.size / 2.0,
-            w: self.size,
-            h: self.size,
+            x: self.x - self.size.x / 2.0,
+            y: self.y - self.size.y / 2.0,
+            w: self.size.x,
+            h: self.size.y,
         }
     }
 }
@@ -49,13 +52,13 @@ pub enum Mode {
 pub struct State {
     pub player_ship: Shape,
     pub lasers: Vec<Shape>,
-    pub enemies: Vec<Shape>,
+    pub enemies: Vec<Enemy>,
 
     pub laser_sprite: AnimatedSprite,
     pub ship_sprite: AnimatedSprite,
-    pub enemy_small_sprite: AnimatedSprite,
+    pub small_enemy_sprite: AnimatedSprite,
     pub medium_enemy_sprite: AnimatedSprite,
-    pub large_enemy_sprite: AnimatedSprite,
+    pub big_enemy_sprite: AnimatedSprite,
 
     pub explosions: Vec<(Emitter, Vec2)>,
     pub direction_modifier: f32,
@@ -68,7 +71,7 @@ pub struct State {
 impl State {
     pub fn init() -> State {
         let player_ship = Shape {
-            size: 32.0,
+            size: vec2(16.0, 24.0),
             speed: MOVEMENT_SPEED,
             x: screen_width() / 2.0,
             y: screen_height() / 3.0,
@@ -132,81 +135,9 @@ impl State {
             true,
         );
 
-        let enemy_small_sprite = AnimatedSprite::new(
-            16,
-            24,
-            &[
-                Animation {
-                    name: "idle".to_string(),
-                    row: 0,
-                    frames: 2,
-                    fps: 12,
-                },
-                Animation {
-                    name: "left".to_string(),
-                    row: 2,
-                    frames: 2,
-                    fps: 12,
-                },
-                Animation {
-                    name: "right".to_string(),
-                    row: 4,
-                    frames: 2,
-                    fps: 12,
-                },
-            ],
-            true,
-        );
-        let medium_enemy_sprite = AnimatedSprite::new(
-            16,
-            24,
-            &[
-                Animation {
-                    name: "idle".to_string(),
-                    row: 0,
-                    frames: 2,
-                    fps: 12,
-                },
-                Animation {
-                    name: "left".to_string(),
-                    row: 2,
-                    frames: 2,
-                    fps: 12,
-                },
-                Animation {
-                    name: "right".to_string(),
-                    row: 4,
-                    frames: 2,
-                    fps: 12,
-                },
-            ],
-            true,
-        );
-        let large_enemy_sprite = AnimatedSprite::new(
-            16,
-            24,
-            &[
-                Animation {
-                    name: "idle".to_string(),
-                    row: 0,
-                    frames: 2,
-                    fps: 12,
-                },
-                Animation {
-                    name: "left".to_string(),
-                    row: 2,
-                    frames: 2,
-                    fps: 12,
-                },
-                Animation {
-                    name: "right".to_string(),
-                    row: 4,
-                    frames: 2,
-                    fps: 12,
-                },
-            ],
-            true,
-        );
+        let small_enemy_sprite = enemy_sprite(EnemyKind::Small);
+        let medium_enemy_sprite = enemy_sprite(EnemyKind::Medium);
+        let big_enemy_sprite = enemy_sprite(EnemyKind::Big);
 
         State {
             player_ship,
@@ -220,11 +151,33 @@ impl State {
             mode,
             laser_sprite,
             ship_sprite,
-            enemy_small_sprite,
+            small_enemy_sprite,
             medium_enemy_sprite,
-            large_enemy_sprite,
+            big_enemy_sprite,
         }
     }
+    pub fn sprite(&self, enemy_kind: EnemyKind) -> &AnimatedSprite {
+        match enemy_kind {
+            EnemyKind::Small => &self.small_enemy_sprite,
+            EnemyKind::Medium => &self.medium_enemy_sprite,
+            EnemyKind::Big => &self.big_enemy_sprite,
+        }
+    }
+}
+
+fn enemy_sprite(enemy_kind: EnemyKind) -> AnimatedSprite {
+    let size = enemy_kind.frame_size();
+    AnimatedSprite::new(
+        size.x as u32,
+        size.y as u32,
+        &[Animation {
+            name: "fly".to_string(),
+            row: 0,
+            frames: 2,
+            fps: 12,
+        }],
+        true,
+    )
 }
 
 impl Debug for State {

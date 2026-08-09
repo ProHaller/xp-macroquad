@@ -14,6 +14,10 @@ mod state;
 use assets::Assets;
 use state::{MOVEMENT_SPEED, Mode, Shape, State};
 
+use crate::assets::{Enemy, EnemyKind};
+
+pub const ENEMY_ASPECT: Vec2 = vec2(16.0, 24.0);
+
 fn particle_explosion() -> EmitterConfig {
     EmitterConfig {
         local_coords: false,
@@ -151,7 +155,7 @@ fn playing(state: &mut State, assets: &Assets) {
             x: state.player_ship.x,
             y: state.player_ship.y - 24.0,
             speed: state.player_ship.speed * 2.0,
-            size: 32.0,
+            size: vec2(32., 32.),
             collided: false,
         });
 
@@ -170,21 +174,27 @@ fn playing(state: &mut State, assets: &Assets) {
     // Clamp X and Y to be within the screen
     wrap_around(&mut state.player_ship);
 
-    // Generate a new square
+    // Generate a new enemy
     if rand::gen_range(0, 99) >= 95 {
-        let size = rand::gen_range(16.0, 64.0);
-        state.enemies.push(Shape {
-            size,
-            speed: rand::gen_range(50.0, 150.0),
-            x: rand::gen_range(size / 2.0, screen_width() - size / 2.0),
-            y: -size,
-            collided: false,
+        let kind = EnemyKind::random();
+        let (min, max) = kind.size_range();
+        let scale = rand::gen_range(min, max) / ENEMY_ASPECT.y; // height-driven
+        let size = ENEMY_ASPECT * scale;
+        state.enemies.push(Enemy {
+            kind,
+            shape: Shape {
+                size,
+                speed: rand::gen_range(50.0, 150.0),
+                x: rand::gen_range(size.x / 2.0, screen_width() - size.x / 2.),
+                y: -size.y,
+                collided: false,
+            },
         });
     }
 
     // Square Movement
-    for square in &mut state.enemies {
-        square.y += square.speed * delta_time;
+    for enemy in &mut state.enemies {
+        enemy.shape.y += enemy.shape.speed * delta_time;
     }
     // laser Movement
     for laser in &mut state.lasers {
@@ -193,17 +203,20 @@ fn playing(state: &mut State, assets: &Assets) {
 
     state.ship_sprite.update();
     state.laser_sprite.update();
+    state.small_enemy_sprite.update();
+    state.medium_enemy_sprite.update();
+    state.big_enemy_sprite.update();
 
     // Remove shapes outside of screen
     state
         .enemies
-        .retain(|square| square.y < screen_height() + square.size);
+        .retain(|enemy| enemy.shape.y < screen_height() + enemy.shape.size.y);
     state
         .lasers
-        .retain(|laser| laser.y > 0.0 - laser.size / 2.0);
+        .retain(|laser| laser.y > 0.0 - laser.size.y / 2.0);
 
     // Remove collided shapes
-    state.enemies.retain(|square| !square.collided);
+    state.enemies.retain(|enemy| !enemy.shape.collided);
     state.lasers.retain(|laser| !laser.collided);
 
     // Remove old explosions
@@ -215,7 +228,7 @@ fn playing(state: &mut State, assets: &Assets) {
     if state
         .enemies
         .iter()
-        .any(|square| state.player_ship.collides_with(square))
+        .any(|enemy| state.player_ship.collides_with(&enemy.shape))
     {
         play_sound(
             &assets.sounds.gameover,
@@ -226,19 +239,19 @@ fn playing(state: &mut State, assets: &Assets) {
         );
         state.mode = Mode::GameOver;
     }
-    for square in state.enemies.iter_mut() {
+    for enemy in state.enemies.iter_mut() {
         for laser in state.lasers.iter_mut() {
-            if laser.collides_with(square) {
+            if laser.collides_with(&enemy.shape) {
                 laser.collided = true;
-                square.collided = true;
-                state.score += square.size.round() as u32;
+                enemy.shape.collided = true;
+                state.score += enemy.shape.size.y.round() as u32;
                 // TODO: handle error
                 state.explosions.push((
                     Emitter::new(EmitterConfig {
-                        amount: square.size.round() as u32 * 2,
+                        amount: enemy.shape.size.y.round() as u32 * 2,
                         ..particle_explosion()
                     }),
-                    vec2(square.x, square.y),
+                    vec2(enemy.shape.x, enemy.shape.y),
                 ));
                 play_sound(
                     &assets.sounds.explosion,
@@ -255,11 +268,11 @@ fn playing(state: &mut State, assets: &Assets) {
     for laser in &state.lasers {
         draw_texture_ex(
             &assets.textures.laser,
-            laser.x - laser.size / 2.0,
-            laser.y - laser.size / 2.0,
+            laser.x - laser.size.x / 2.0,
+            laser.y - laser.size.y / 2.0,
             WHITE,
             DrawTextureParams {
-                dest_size: Some(vec2(laser.size, laser.size)),
+                dest_size: Some(vec2(laser.size.x, laser.size.y)),
                 source: Some(laser_frame.source_rect),
                 ..Default::default()
             },
@@ -267,7 +280,6 @@ fn playing(state: &mut State, assets: &Assets) {
     }
     let ship_frame = state.ship_sprite.frame();
 
-    let enemy_frame = state.enemy_small_sprite.frame();
     draw_texture_ex(
         &assets.textures.ship,
         state.player_ship.x - ship_frame.dest_size.x,
@@ -279,15 +291,17 @@ fn playing(state: &mut State, assets: &Assets) {
             ..Default::default()
         },
     );
+
     for enemy in &state.enemies {
+        let dest = vec2(enemy.shape.size.x, enemy.shape.size.y);
+        let enemy_frame = state.sprite(enemy.kind).frame();
         draw_texture_ex(
-            &assets.textures.enemy_small,
-            enemy.x - enemy_frame.dest_size.x * 2.0,
-            enemy.y - enemy_frame.dest_size.y * 2.0,
-            GREEN,
-            // TODO: Fix enemy size
+            assets.textures.enemy(enemy.kind),
+            enemy.shape.x - dest.x / 2.0,
+            enemy.shape.y - dest.y / 2.0,
+            WHITE,
             DrawTextureParams {
-                dest_size: Some(enemy_frame.dest_size / 1. + enemy.size),
+                dest_size: Some(dest),
                 source: Some(enemy_frame.source_rect),
                 ..Default::default()
             },

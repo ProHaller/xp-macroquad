@@ -1,8 +1,11 @@
 use color_eyre::{Result, eyre::Context};
 use macroquad::{
     audio::{Sound, load_sound},
+    experimental::animation::AnimatedSprite,
     prelude::*,
 };
+
+use crate::state::Shape;
 
 const FRAGMENT_SHADER: &str = include_str!("starfield-shader.glsl");
 const VERTEX_SHADER: &str = include_str!("vertex_shader.glsl");
@@ -10,9 +13,52 @@ const VERTEX_SHADER: &str = include_str!("vertex_shader.glsl");
 #[derive(Debug)]
 pub struct Assets {
     pub textures: Textures,
+
     pub sounds: Sounds,
     pub material: Material,
     pub render_target: RenderTarget,
+}
+
+#[derive(Debug)]
+pub struct Enemy {
+    pub kind: EnemyKind,
+    pub shape: Shape,
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub enum EnemyKind {
+    Small,
+    Medium,
+    Big,
+}
+
+impl EnemyKind {
+    pub fn random() -> Self {
+        Self::from_roll(rand::gen_range(0.0, 1.0))
+    }
+    pub fn from_roll(roll: f32) -> Self {
+        match roll {
+            s if s < 0.6 => EnemyKind::Small,
+            s if s < 0.9 => EnemyKind::Medium,
+            _ => EnemyKind::Big,
+        }
+    }
+    /// Drawn height range, in screen pixels.
+    pub fn size_range(self) -> (f32, f32) {
+        match self {
+            EnemyKind::Small => (16.0, 32.0),
+            EnemyKind::Medium => (32.0, 48.0),
+            EnemyKind::Big => (48.0, 64.0),
+        }
+    }
+
+    pub fn frame_size(self) -> Vec2 {
+        match self {
+            EnemyKind::Small => vec2(34. / 2., 16.),
+            EnemyKind::Medium => vec2(64. / 2., 16.),
+            EnemyKind::Big => vec2(64. / 2., 32.),
+        }
+    }
 }
 
 impl Assets {
@@ -110,6 +156,13 @@ impl Textures {
             enemy_big,
             laser,
         })
+    }
+    pub fn enemy(&self, enemy: EnemyKind) -> &Texture2D {
+        match enemy {
+            EnemyKind::Small => &self.enemy_small,
+            EnemyKind::Medium => &self.enemy_medium,
+            EnemyKind::Big => &self.enemy_big,
+        }
     }
 }
 
